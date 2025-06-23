@@ -3,8 +3,10 @@ import tempfile
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import io
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 def generate_gfx_font_proper(font_path, font_size, charset):
     font = ImageFont.truetype(font_path, font_size)
