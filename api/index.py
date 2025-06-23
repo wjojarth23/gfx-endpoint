@@ -14,8 +14,8 @@ def generate_gfx_font(font_path, font_name_in, font_size, charset):
     """
     Generates an Adafruit GFX font header file from a TTF font.
 
-    This corrected version fixes bitmap packing (MSB-first), yOffset calculation,
-    and uses dynamic names for the font data structures in the C output.
+    This corrected version uses font.getmask() for robust bitmap generation
+    and corrects the yOffset calculation to fix rendering artifacts.
 
     Args:
         font_path (str): Path to the .ttf font file.
@@ -32,7 +32,8 @@ def generate_gfx_font(font_path, font_name_in, font_size, charset):
     font = ImageFont.truetype(font_path, font_size)
     gfx_output = io.StringIO()
 
-    # Get global font metrics
+    # Get global font metrics. Ascent is distance from baseline to top.
+    # y_advance is the recommended line spacing.
     ascent, descent = font.getmetrics()
     y_advance = ascent + descent
 
@@ -44,7 +45,6 @@ def generate_gfx_font(font_path, font_name_in, font_size, charset):
     bitmaps = bytearray()
     glyphs = []
     
-    # GFX fonts require a contiguous range of characters
     first_char_code = ord(charset[0])
     last_char_code = ord(charset[-1])
 
@@ -54,66 +54,67 @@ def generate_gfx_font(font_path, font_name_in, font_size, charset):
     for char_code in range(first_char_code, last_char_code + 1):
         char = chr(char_code)
         
-        # Skip characters that are not in the requested charset but are in the range
+        # GFX Fonts require a continuous block of characters.
+        # If a character is missing, we add a placeholder glyph.
         if char not in charset:
-            glyphs.append({ 'bitmapOffset': bitmap_offset, 'width': 0, 'height': 0, 'xAdvance': 0, 'xOffset': 0, 'yOffset': 0, 'char': char})
+            glyphs.append({'bitmapOffset': bitmap_offset, 'width': 0, 'height': 0, 'xAdvance': 0, 'xOffset': 0, 'yOffset': 0, 'char': char})
             continue
 
-        # Get the bounding box of the character
+        # --- FIX 1: Use getmask() for robust bitmap data ---
+        # This gets the actual rendered bitmap and its size, preventing mismatches
+        # that cause shearing/diagonal rendering artifacts.
         try:
+            mask = font.getmask(char, mode='1')
+            width, height = mask.size
+            # We still need getbbox() to find the offset from the drawing origin.
             bbox = font.getbbox(char)
-        except TypeError: # Handle potential Pillow version inconsistencies
-            bbox = None
-
-        if bbox is None:
-            # Handle characters with no visual representation (like space)
+            x_offset = bbox[0]
+            y_offset_top = bbox[1] # Distance from baseline to top of char
+        except (TypeError, AttributeError):
+            # This handles whitespace or other non-rendering characters
+            mask = None
             width, height, x_offset, y_offset_top = 0, 0, 0, 0
-            # Use width of a standard character like 'a' as a heuristic for space's advance
-            x_advance = int(font.getlength("a") / 2)
-            bitmap_byte_count = 0
-        else:
-            left, top, right, bottom = bbox
-            width = right - left
-            height = bottom - top
-            x_offset = left
-            y_offset_top = top
+        
+        # Horizontal advance is the distance to move the cursor for the next char
+        try:
+            x_advance = int(font.getlength(char))
+        except Exception: # Fallback for odd fonts or missing characters
+             x_advance = width + x_offset if width > 0 else int(font.getlength("a") / 2)
 
-            # Create a 1-bit mask image for the character
-            mask = Image.new("1", (width, height))
-            draw = ImageDraw.Draw(mask)
-            # Draw character, offsetting it to the top-left of the mask
-            draw.text((-left, -top), char, font=font, fill=1)
 
-            # Convert mask to a numpy array for easy pixel access
+        bitmap_byte_count = 0
+        if mask:
+            # The mask is our bitmap. Convert it to a numpy array for processing.
             bitmap_np = np.array(mask).astype(np.uint8)
             
             char_bitmap_bytes = bytearray()
-            # --- Correct Bitmap Packing (MSB-First) ---
-            # This was the primary source of visual corruption in the original code.
+            # --- Pack bitmap into bytes, MSB-first ---
             for y in range(height):
                 for x_byte in range((width + 7) // 8):
                     byte = 0
                     for x_bit in range(8):
                         x = x_byte * 8 + x_bit
                         if x < width:
+                            # In the mask, a non-zero value means the pixel is set.
                             if bitmap_np[y, x]:
-                                byte |= 1 << (7 - x_bit) # Pack bits MSB-first
+                                byte |= 1 << (7 - x_bit)
                     char_bitmap_bytes.append(byte)
             
             bitmaps.extend(char_bitmap_bytes)
             bitmap_byte_count = len(char_bitmap_bytes)
-            x_advance = int(font.getlength(char))
 
         # --- GFX Glyph Struct Population ---
+        # --- FIX 2: Correct yOffset Calculation ---
+        # yOffset is the vertical distance from the baseline to the top of the bitmap.
+        # A negative value moves the bitmap UP from the baseline.
+        # y_offset_top from Pillow is the distance up from the baseline, so we negate it.
         glyphs.append({
             'bitmapOffset': bitmap_offset,
             'width': width, 
             'height': height,
             'xAdvance': x_advance,
             'xOffset': x_offset,
-            # Correct yOffset calculation: distance from baseline to top of char bitmap.
-            # A positive value moves the bitmap down from the baseline.
-            'yOffset': (ascent - y_offset_top) if bbox else 0,
+            'yOffset': -y_offset_top if height > 0 else 0,
             'char': char
         })
         bitmap_offset += bitmap_byte_count
@@ -195,3 +196,7 @@ def generate_gfx_route():
             import traceback
             traceback.print_exc() # Log the full error to the server console
             return jsonify({'error': f'Failed to process font: {str(e)}'}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
+
