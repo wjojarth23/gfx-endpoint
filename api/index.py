@@ -60,26 +60,26 @@ def generate_gfx_font(font_path, font_name_in, font_size, charset):
             glyphs.append({'bitmapOffset': bitmap_offset, 'width': 0, 'height': 0, 'xAdvance': 0, 'xOffset': 0, 'yOffset': 0, 'char': char})
             continue
         
-        # --- FIX: Derive dimensions directly from the numpy bitmap array ---
-        # This prevents "out of bounds" errors by ensuring the loop bounds
-        # always match the array being indexed.
+        # --- FIX: Use authoritative dimensions from the mask's size ---
+        # This prevents errors where a 1D numpy array from a tall, thin character
+        # was incorrectly reshaped into a single horizontal row.
         width, height, x_offset, y_offset_top = 0, 0, 0, 0
         bitmap_np = None
 
         try:
-            # Get the character's bitmap mask
+            # Get the character's bitmap mask from Pillow
             mask = font.getmask(char, mode='1')
-            # Convert mask to a numpy array, which is the authoritative source
-            bitmap_np = np.array(mask).astype(np.uint8)
+            # Get the definitive width and height from the mask's properties
+            width, height = mask.size
+
+            # Convert mask data to a numpy array
+            bitmap_data = np.array(mask).astype(np.uint8)
             
-            # Reshape 1D arrays (from 1-pixel-high chars) to 2D
-            if bitmap_np.ndim == 1:
-                bitmap_np = np.reshape(bitmap_np, (1, -1))
+            # Explicitly reshape the data using the correct width and height.
+            # This correctly handles all characters, including those that are 1px wide or 1px high.
+            bitmap_np = np.reshape(bitmap_data, (height, width))
             
-            # Get dimensions directly from the final numpy array's shape
-            height, width = bitmap_np.shape
-            
-            # Get the bounding box to find offsets
+            # Get the bounding box to find render offsets
             bbox = font.getbbox(char)
             x_offset = bbox[0]
             y_offset_top = bbox[1]
@@ -201,3 +201,6 @@ def generate_gfx_route():
             import traceback
             traceback.print_exc() # Log the full error to the server console
             return jsonify({'error': f'Failed to process font: {str(e)}'}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
