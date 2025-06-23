@@ -59,35 +59,43 @@ def generate_gfx_font(font_path, font_name_in, font_size, charset):
         if char not in charset:
             glyphs.append({'bitmapOffset': bitmap_offset, 'width': 0, 'height': 0, 'xAdvance': 0, 'xOffset': 0, 'yOffset': 0, 'char': char})
             continue
+        
+        # --- FIX: Derive dimensions directly from the numpy bitmap array ---
+        # This prevents "out of bounds" errors by ensuring the loop bounds
+        # always match the array being indexed.
+        width, height, x_offset, y_offset_top = 0, 0, 0, 0
+        bitmap_np = None
 
-        # Use getmask() for robust bitmap data
         try:
+            # Get the character's bitmap mask
             mask = font.getmask(char, mode='1')
-            width, height = mask.size
+            # Convert mask to a numpy array, which is the authoritative source
+            bitmap_np = np.array(mask).astype(np.uint8)
+            
+            # Reshape 1D arrays (from 1-pixel-high chars) to 2D
+            if bitmap_np.ndim == 1:
+                bitmap_np = np.reshape(bitmap_np, (1, -1))
+            
+            # Get dimensions directly from the final numpy array's shape
+            height, width = bitmap_np.shape
+            
+            # Get the bounding box to find offsets
             bbox = font.getbbox(char)
             x_offset = bbox[0]
             y_offset_top = bbox[1]
         except (TypeError, AttributeError):
-            mask = None
+            # This handles non-rendering characters like 'space'
             width, height, x_offset, y_offset_top = 0, 0, 0, 0
-        
+            bitmap_np = None
+
         # Horizontal advance is the distance to move the cursor for the next char
         try:
             x_advance = int(font.getlength(char))
         except Exception:
              x_advance = width + x_offset if width > 0 else int(font.getlength("a") / 2)
 
-
         bitmap_byte_count = 0
-        if mask:
-            # The mask is our bitmap. Convert it to a numpy array for processing.
-            bitmap_np = np.array(mask).astype(np.uint8)
-            
-            # --- FIX: Handle 1-pixel-high characters ---
-            # For very small fonts, a character bitmap can be 1D. Reshape it to 2D.
-            if bitmap_np.ndim == 1:
-                bitmap_np = np.reshape(bitmap_np, (1, bitmap_np.shape[0]))
-
+        if bitmap_np is not None:
             char_bitmap_bytes = bytearray()
             # --- Pack bitmap into bytes, MSB-first ---
             for y in range(height):
