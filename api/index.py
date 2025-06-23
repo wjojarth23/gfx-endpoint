@@ -60,25 +60,21 @@ def generate_gfx_font(font_path, font_name_in, font_size, charset):
             glyphs.append({'bitmapOffset': bitmap_offset, 'width': 0, 'height': 0, 'xAdvance': 0, 'xOffset': 0, 'yOffset': 0, 'char': char})
             continue
 
-        # --- FIX 1: Use getmask() for robust bitmap data ---
-        # This gets the actual rendered bitmap and its size, preventing mismatches
-        # that cause shearing/diagonal rendering artifacts.
+        # Use getmask() for robust bitmap data
         try:
             mask = font.getmask(char, mode='1')
             width, height = mask.size
-            # We still need getbbox() to find the offset from the drawing origin.
             bbox = font.getbbox(char)
             x_offset = bbox[0]
-            y_offset_top = bbox[1] # Distance from baseline to top of char
+            y_offset_top = bbox[1]
         except (TypeError, AttributeError):
-            # This handles whitespace or other non-rendering characters
             mask = None
             width, height, x_offset, y_offset_top = 0, 0, 0, 0
         
         # Horizontal advance is the distance to move the cursor for the next char
         try:
             x_advance = int(font.getlength(char))
-        except Exception: # Fallback for odd fonts or missing characters
+        except Exception:
              x_advance = width + x_offset if width > 0 else int(font.getlength("a") / 2)
 
 
@@ -87,6 +83,11 @@ def generate_gfx_font(font_path, font_name_in, font_size, charset):
             # The mask is our bitmap. Convert it to a numpy array for processing.
             bitmap_np = np.array(mask).astype(np.uint8)
             
+            # --- FIX: Handle 1-pixel-high characters ---
+            # For very small fonts, a character bitmap can be 1D. Reshape it to 2D.
+            if bitmap_np.ndim == 1:
+                bitmap_np = np.reshape(bitmap_np, (1, bitmap_np.shape[0]))
+
             char_bitmap_bytes = bytearray()
             # --- Pack bitmap into bytes, MSB-first ---
             for y in range(height):
@@ -104,10 +105,6 @@ def generate_gfx_font(font_path, font_name_in, font_size, charset):
             bitmap_byte_count = len(char_bitmap_bytes)
 
         # --- GFX Glyph Struct Population ---
-        # --- FIX 2: Correct yOffset Calculation ---
-        # yOffset is the vertical distance from the baseline to the top of the bitmap.
-        # A negative value moves the bitmap UP from the baseline.
-        # y_offset_top from Pillow is the distance up from the baseline, so we negate it.
         glyphs.append({
             'bitmapOffset': bitmap_offset,
             'width': width, 
@@ -196,7 +193,3 @@ def generate_gfx_route():
             import traceback
             traceback.print_exc() # Log the full error to the server console
             return jsonify({'error': f'Failed to process font: {str(e)}'}), 500
-
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
-
