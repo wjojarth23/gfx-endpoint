@@ -34,19 +34,15 @@ def generate_gfx_font(font_path, font_size, charset):
         bitmap = np.array(mask).astype(np.uint8)
         bitmap = (bitmap > 128).astype(np.uint8)
         
-        # Correct row-major, true LSB-first packing
+        row_padded = ((width + 7) // 8) * 8  # Pad row to next byte boundary
         for y in range(bitmap.shape[0]):
-            byte = 0
-            bit_count = 0
-            for x in range(bitmap.shape[1]):
-                if bitmap[y, x]:
-                    byte |= (1 << bit_count)
-                bit_count += 1
-                if bit_count == 8:
-                    bitmaps.append(byte)
-                    byte = 0
-                    bit_count = 0
-            if bit_count > 0:
+            for byte_index in range(0, row_padded, 8):
+                byte = 0
+                for bit in range(8):
+                    x = byte_index + bit
+                    if x < bitmap.shape[1]:
+                        if bitmap[y, x]:
+                            byte |= (1 << bit)
                 bitmaps.append(byte)
 
         advance = int(font.getlength(char))
@@ -58,7 +54,7 @@ def generate_gfx_font(font_path, font_size, charset):
             'xOffset': offset_x,
             'yOffset': offset_y
         })
-        bitmap_offset += len(bitmaps) - bitmap_offset
+        bitmap_offset += (row_padded // 8) * height
 
     gfx_output.write("const uint8_t RajdhaniBitmaps[] PROGMEM = {\n")
     for i, byte in enumerate(bitmaps):
