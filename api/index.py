@@ -34,7 +34,7 @@ def generate_gfx_font(font_path, font_size, charset):
         bitmap = np.array(mask).astype(np.uint8)
         bitmap = (bitmap > 128).astype(np.uint8)
         
-        # Correct row-major, LSB-first packing
+        # Correct row-major, true LSB-first packing
         for y in range(bitmap.shape[0]):
             byte = 0
             bit_count = 0
@@ -101,6 +101,7 @@ def generate_gfx_route():
             return send_file(temp_output.name, as_attachment=True, download_name="RajdhaniFont.h")
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
 
 @app.route('/')
 def home():
