@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file, jsonify, make_response
 import tempfile
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -6,7 +6,7 @@ import io
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # This allows OPTIONS preflight, but we'll still set headers manually per response
 
 def generate_gfx_font_proper(font_path, font_size, charset):
     font = ImageFont.truetype(font_path, font_size)
@@ -89,7 +89,7 @@ def generate_gfx_font_proper(font_path, font_size, charset):
 @app.route('/generate_gfx', methods=['POST'])
 def generate_gfx_route():
     if 'file' not in request.files:
-        return jsonify({'error': 'No file uploaded'}), 400
+        return make_response(jsonify({'error': 'No file uploaded'}), 400)
     
     file = request.files['file']
     with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as temp_font:
@@ -102,10 +102,14 @@ def generate_gfx_route():
             with open(temp_output.name, "w") as f:
                 f.write(gfx_content)
 
-            return send_file(temp_output.name, as_attachment=True, download_name="Rajdhani120pt7b.h")
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            response = make_response(send_file(temp_output.name, as_attachment=True, download_name="Rajdhani120pt7b.h"))
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+            response.headers['Access-Control-Allow-Methods'] = 'POST, GET, OPTIONS'
+            return response
 
+        except Exception as e:
+            return make_response(jsonify({'error': str(e)}), 500)
 
 @app.route('/')
 def home():
